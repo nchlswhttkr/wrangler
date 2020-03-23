@@ -44,19 +44,31 @@ pub(super) fn upload(
 pub(super) fn init(
     deploy_config: &DeployConfig,
     user: &GlobalUser,
-) -> Result<(String, String), failure::Error> {
-    let exchange_url = get_exchange_url(deploy_config, user)?;
+) -> Result<InitResponse, failure::Error> {
+    let (exchange_url, ws_token) = get_initial_setup(deploy_config, user)?;
+    let exchange_url = exchange_url.host_str().expect("Could not get host string, please file an issue at https://github.com/cloudflare/wrangler").to_string();
     let client = http::auth_client(None, &user);
     let response = client
         .get(exchange_url.clone())
         .send()?
         .error_for_status()?;
     let headers = response.headers();
-    let token = headers.get("cf-workers-preview-token");
-    match token {
-        Some(token) => Ok((token.to_str()?.to_string(), exchange_url.host_str().expect("Could not get host string, please file an issue at https://github.com/cloudflare/wrangler").to_string())),
+    let preview_token = headers.get("cf-workers-preview-token");
+    let preview_token = preview_token.to_str()?.to_string();
+    match preview_token {
+        Some(preview_token) => Ok(InitResponse {
+            preview_token,
+            ws_token,
+            exchange_url,
+        }),
         None => failure::bail!("Could not get token to initialize preview session"),
     }
+}
+
+struct InitResponse {
+    pub preview_token: String,
+    pub ws_token: String,
+    pub exchange_url: String,
 }
 
 fn get_session_config(deploy_config: &DeployConfig) -> serde_json::Value {
@@ -93,17 +105,18 @@ fn get_upload_address(target: &mut Target) -> String {
     )
 }
 
-fn get_exchange_url(
+fn get_initial_setup(
     deploy_config: &DeployConfig,
     user: &GlobalUser,
-) -> Result<Url, failure::Error> {
+) -> Result<(Url, String), failure::Error> {
     let client = http::auth_client(None, &user);
     let address = get_initialize_address(deploy_config);
     let url = Url::parse(&address)?;
     let response = client.get(url).send()?.error_for_status()?;
     let text = &response.text()?;
     let response: InitV4ApiResponse = serde_json::from_str(text)?;
-    Url::parse(&response.result.exchange_url).map_err(|e| format_err!("{}", e))
+    let url = Url::parse(&response.result.exchange_url).map_err(|e| format_err!("{}", e))?;
+    Ok((url, response.result.token))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
