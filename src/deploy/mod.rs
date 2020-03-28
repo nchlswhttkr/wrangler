@@ -35,6 +35,20 @@ pub fn worker(user: &GlobalUser, deploy_config: &DeployConfig) -> Result<(), fai
                 display_results.join("\n")
             ));
 
+            let errored_results = published_routes
+                .iter()
+                .filter(|r| match r {
+                    route::RouteUploadResult::Conflict(_) => true,
+                    route::RouteUploadResult::Error(_) => true,
+                    route::RouteUploadResult::Same(_) => false,
+                    route::RouteUploadResult::New(_) => false,
+                })
+                .count();
+
+            if errored_results > 0 {
+                failure::bail!("Something went wrong while publishing routes");
+            }
+
             Ok(())
         }
     }
